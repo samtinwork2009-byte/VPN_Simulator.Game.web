@@ -279,6 +279,16 @@
             touch-action: manipulation;
             -webkit-tap-highlight-color: transparent;
             transition: all 0.2s;
+            /* 觸控最小尺寸 44x44px */
+            min-height: 44px;
+            min-width: 44px;
+            /* 鍵盤焦點樣式 */
+            outline: none;
+        }
+        
+        .btn:focus {
+            outline: 3px solid rgba(96, 165, 250, 0.5);
+            outline-offset: 2px;
         }
         
         .btn:hover {
@@ -1135,6 +1145,11 @@
             to { opacity: 1; transform: translateY(0); }
         }
         
+        @keyframes slideOut {
+            from { opacity: 1; transform: translateY(0); }
+            to { opacity: 0; transform: translateY(15px); }
+        }
+        
         @keyframes pulse {
             0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
             70% { box-shadow: 0 0 0 12px rgba(59, 130, 246, 0); }
@@ -1293,7 +1308,13 @@
     <div class="nav-buttons">
         <button class="nav-btn secondary" id="backBtn"><i class="fas fa-arrow-left"></i> 返回</button>
         <button class="nav-btn" id="homeBtn"><i class="fas fa-home"></i> 主頁</button>
+        <button class="nav-btn secondary" id="achievementBtn" title="查看成就"><i class="fas fa-trophy"></i> 成就</button>
+        <button class="nav-btn secondary" id="exportBtn" title="匯出進度"><i class="fas fa-download"></i> 匯出</button>
+        <button class="nav-btn secondary" id="importBtn" title="匯入進度"><i class="fas fa-upload"></i> 匯入</button>
     </div>
+    
+    <!-- 隱藏的檔案輸入 -->
+    <input type="file" id="importFile" accept=".json" style="display: none;">
 
     <!-- 引導遮罩 -->
     <div class="guide-overlay" id="guideOverlay"></div>
@@ -2583,7 +2604,24 @@
                 tutorial: false,
                 challenge: false,
                 freeMode: false
-            }
+            },
+            
+            // 成就系統
+            achievements: {
+                encryption_master: { name: '加密大師', description: '完成所有加密課程', unlocked: false, unlockedAt: null },
+                tunnel_expert: { name: '隧道專家', description: '完成所有隧道課程', unlocked: false, unlockedAt: null },
+                security_guardian: { name: '安全衛士', description: '達成安全分數100', unlocked: false, unlockedAt: null },
+                speed_racer: { name: '速度賽手', description: '達成速度分數100', unlocked: false, unlockedAt: null },
+                config_collector: { name: '配置收集者', description: '應用10個不同配置', unlocked: false, unlockedAt: null },
+                quiz_champion: { name: '測驗冠軍', description: '完成所有測驗', unlocked: false, unlockedAt: null },
+                challenge_complete: { name: '挑戰完成者', description: '完成所有挑戰關卡', unlocked: false, unlockedAt: null }
+            },
+            
+            // 使用者筆記
+            notes: [],
+            
+            // 配置應用計數
+            configApplyCount: 0
         };
 
         // 問答題庫
@@ -2711,26 +2749,35 @@
         const backBtn = document.getElementById('backBtn');
         const homeBtn = document.getElementById('homeBtn');
         
-        // 保存和加載遊戲狀態
+        // 保存和加載遊戲狀態（with error handling）
         function saveGameState() {
-            localStorage.setItem('vpnGameState', JSON.stringify(gameState));
-            const saveStatus = document.getElementById('saveStatus');
-            if (saveStatus) {
-                saveStatus.textContent = '遊戲進度已保存';
-                setTimeout(() => {
-                    saveStatus.textContent = '';
-                }, 2000);
+            try {
+                localStorage.setItem('vpnGameState', JSON.stringify(gameState));
+                const saveStatus = document.getElementById('saveStatus');
+                if (saveStatus) {
+                    saveStatus.textContent = '遊戲進度已保存';
+                    setTimeout(() => {
+                        if (saveStatus) saveStatus.textContent = '';
+                    }, 2000);
+                }
+            } catch (e) {
+                console.warn('localStorage unavailable:', e.message);
             }
         }
         
         function loadGameState() {
-            const savedState = localStorage.getItem('vpnGameState');
-            if (savedState) {
-                const parsedState = JSON.parse(savedState);
-                // 合併保存的狀態，但要保持某些默認值
-                Object.assign(gameState, parsedState);
-                console.log('遊戲狀態已加載');
-                return true;
+            try {
+                const savedState = localStorage.getItem('vpnGameState');
+                if (savedState && typeof savedState === 'string') {
+                    const parsedState = JSON.parse(savedState);
+                    if (parsedState && typeof parsedState === 'object') {
+                        Object.assign(gameState, parsedState);
+                        console.log('遊戲狀態已加載');
+                        return true;
+                    }
+                }
+            } catch (e) {
+                console.warn('localStorage parse error:', e.message);
             }
             return false;
         }
@@ -2783,14 +2830,30 @@
             showGuideIfNeeded(pageId);
         }
         
-        // 頁面離開前保存狀態
+        // 頁面離開前保存狀態與清理事件
         function beforeLeavePage(pageId) {
             switch(pageId) {
                 case 'tutorialPage':
                     // 教學模式狀態已實時保存
+                    // 移除可能的動態監聽器
+                    const tutorialSteps = document.querySelectorAll('[data-page="tutorialPage"] .step');
+                    if (tutorialSteps) {
+                        tutorialSteps.forEach(step => {
+                            // 移除並重新綁定以避免重複綁定
+                            const clone = step.cloneNode(true);
+                            step.parentNode.replaceChild(clone, step);
+                        });
+                    }
                     break;
                 case 'challengePage':
                     // 挑戰模式狀態已實時保存
+                    const challengeComps = document.querySelectorAll('#challengeLevel1Screen .component');
+                    if (challengeComps) {
+                        challengeComps.forEach(comp => {
+                            const clone = comp.cloneNode(true);
+                            comp.parentNode.replaceChild(clone, comp);
+                        });
+                    }
                     break;
                 case 'freeModePage':
                     // 自由模式狀態已實時保存
@@ -4593,13 +4656,27 @@
                 addFreeModeLog(`已應用「${preset}」預設配置。`, "success");
             }
             
-            // 應用配置
+            // 應用配置（with validation & debounce）
+            let applyConfigLocked = false;
             applyFreeConfigBtn.addEventListener('click', function() {
-                // 收集配置
+                if (applyConfigLocked) return; // 防連續點擊
+                applyConfigLocked = true;
+                setTimeout(() => { applyConfigLocked = false; }, 1000);
+                
+                // 驗證與收集配置
+                const portInput = document.getElementById('freePortInput').value.trim();
+                const port = parseInt(portInput, 10);
+                
+                // 驗證端口號 (1-65535)
+                if (!portInput || isNaN(port) || port < 1 || port > 65535) {
+                    addFreeModeLog(`錯誤：端口必須在 1-65535 之間，您輸入了 "${portInput}"`, "error");
+                    applyConfigLocked = false;
+                    return;
+                }
+                
                 const encryption = document.getElementById('freeEncryptionSelect').value;
                 const encryptionMode = document.getElementById('freeEncryptionMode').value;
                 const protocol = document.getElementById('freeProtocolSelect').value;
-                const port = document.getElementById('freePortInput').value;
                 
                 const authMethods = [];
                 if (document.getElementById('freeAuthPassword').checked) authMethods.push('password');
@@ -4618,7 +4695,7 @@
                     encryption,
                     encryptionMode,
                     protocol,
-                    port,
+                    port: port, // 使用驗證過的整數
                     authMethods,
                     features
                 };
@@ -4631,7 +4708,7 @@
                     <div class="command-line" style="color: var(--success);">加密模式: ${encryptionMode.toUpperCase()}</div>
                     <div class="command-line" style="color: var(--success);">VPN協議: ${protocol}</div>
                     <div class="command-line" style="color: var(--success);">端口: ${port}</div>
-                    <div class="command-line" style="color: var(--success);">認證方式: ${authMethods.join(', ')}</div>
+                    <div class="command-line" style="color: var(--success);">認證方式: ${authMethods.join(', ') || '無'}</div>
                     <div class="command-line" style="color: var(--success);">安全功能: ${features.length} 個</div>
                     <div class="command-line" style="color: var(--success); font-weight: bold;">VPN配置已成功應用！</div>
                     <br>
@@ -4640,19 +4717,60 @@
                 
                 addFreeModeLog("VPN配置已應用。", "success");
                 addFreeModeLog(`配置詳情: ${encryption.toUpperCase()} 加密, ${protocol} 協議, 端口 ${port}`, "info");
+                
+                // === 成就解鎖邏輯 ===
+                gameState.configApplyCount++;
+                if (gameState.configApplyCount >= 10) {
+                    unlockAchievement('config_collector');
+                }
+                
+                // 檢查加密大師和隧道專家（教學中會實現）
+                if (gameState.tutorial.progress >= 100) {
+                    if (encryption.includes('aes')) {
+                        unlockAchievement('encryption_master');
+                    }
+                    if (protocol.includes('tunnel') || protocol.includes('vpn')) {
+                        unlockAchievement('tunnel_expert');
+                    }
+                }
+                
+                // 檢查安全衛士（高安全配置）
+                if (encryption.includes('aes-256') && features.includes('killSwitch') && features.includes('dnsProtection')) {
+                    unlockAchievement('security_guardian');
+                }
+                
                 saveGameState();
             });
             
-            // 模擬測試
+            // 模擬測試（with debounce）
+            let simulateLocked = false;
             simulateBtn.addEventListener('click', function() {
+                if (simulateLocked) return;
+                simulateLocked = true;
+                setTimeout(() => { simulateLocked = false; }, 800);
+                
                 const simulationTest = document.getElementById('freeSimulationTest');
-                simulationTest.style.display = 'block';
-                simulationTest.scrollIntoView({ behavior: 'smooth' });
+                if (simulationTest) {
+                    simulationTest.style.display = 'block';
+                    simulationTest.scrollIntoView({ behavior: 'smooth' });
+                }
                 addFreeModeLog("開啟模擬測試環境。", "info");
             });
             
-            // 生成配置代碼
+            // 生成配置代碼（with debounce & error check）
+            let generateLocked = false;
             generateBtn.addEventListener('click', function() {
+                if (generateLocked) return;
+                generateLocked = true;
+                setTimeout(() => { generateLocked = false; }, 1000);
+                
+                // 驗證配置是否已設置
+                if (!gameState.freeConfig || !gameState.freeConfig.port) {
+                    addFreeModeLog("錯誤：請先應用VPN配置", "error");
+                    generateLocked = false;
+                    return;
+                }
+                
                 // 根據配置生成配置代碼
                 let configCodeText = '';
                 
@@ -4987,7 +5105,219 @@ verb 3
             messageLog.scrollTop = messageLog.scrollHeight;
         }
         
-        // 初始化事件監聽
+        // === 術語字典 ===
+        const glossary = {
+            'AES-256': '高級加密標準，密鑰長度256位，當前最安全的對稱加密標準之一',
+            'RSA': '非對稱加密算法，使用公鑰加密，私鑰解密，廣泛應用於數位簽名',
+            'OpenVPN': '開源VPN協議，具有高度可配置性和跨平台支持',
+            'WireGuard': '現代VPN協議，代碼簡潔，性能優秀，逐漸成為主流',
+            'L2TP/IPsec': '層級2隧道協議，通常與IPsec結合提供加密和認證',
+            'PPTP': '點對點隧道協議，速度快但安全性已被破解',
+            'IKEv2': '互聯網密鑰交換協議版本2，支持移動環境漫遊',
+            '2FA': '雙因素認證，結合密碼和其他認證方式增強安全性',
+            'DNS洩漏': '用戶DNS請求未通過VPN隧道，可能洩露瀏覽歷史',
+            '終止開關': 'VPN斷開時自動阻止所有網路流量的安全機制',
+            'WebRTC': '網路即時通信技術，可能洩露真實IP地址',
+            '中間人攻擊': '攻擊者在通信雙方之間截取和修改數據的攻擊方式',
+            'DDoS': '分散式拒絕服務攻擊，利用大量設備發送流量癱瘓目標',
+            '加密': '將明文數據轉換為密文的過程，只有持有密鑰者能解密',
+            '公鑰': '非對稱加密中任何人都可見的密鑰，用於加密數據',
+            '私鑰': '非對稱加密中只有所有者持有的密鑰，用於解密數據',
+            '哈希': '將任意長度數據轉換為固定長度指紋的單向函數'
+        };
+        
+        // === 成就解鎖函數 ===
+        function unlockAchievement(achievementId) {
+            if (gameState.achievements[achievementId] && !gameState.achievements[achievementId].unlocked) {
+                gameState.achievements[achievementId].unlocked = true;
+                gameState.achievements[achievementId].unlockedAt = new Date().toISOString();
+                showAchievementNotification(gameState.achievements[achievementId].name);
+                saveGameState();
+            }
+        }
+        
+        // === 成就通知 ===
+        function showAchievementNotification(achievementName) {
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: linear-gradient(135deg, #f59e0b, #f97316);
+                color: white;
+                padding: 15px 20px;
+                border-radius: 8px;
+                z-index: 9999;
+                font-weight: bold;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                animation: slideIn 0.3s ease;
+            `;
+            notification.innerHTML = `🏆 成就解鎖：${achievementName}`;
+            document.body.appendChild(notification);
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s ease';
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
+        
+        // === 術語快速查詢 ===
+        function showTermDefinition(term) {
+            if (glossary[term]) {
+                const tooltip = document.createElement('div');
+                tooltip.style.cssText = `
+                    position: fixed;
+                    background: rgba(15, 23, 42, 0.95);
+                    color: #e2e8f0;
+                    padding: 12px 16px;
+                    border-radius: 6px;
+                    font-size: 0.9rem;
+                    z-index: 9998;
+                    border-left: 3px solid #3b82f6;
+                    max-width: 300px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+                `;
+                tooltip.textContent = `${term}: ${glossary[term]}`;
+                tooltip.style.top = '50%';
+                tooltip.style.left = '50%';
+                tooltip.style.transform = 'translate(-50%, -50%)';
+                document.body.appendChild(tooltip);
+                setTimeout(() => tooltip.remove(), 4000);
+            }
+        }
+        
+        // === 進度匯出 ===
+        function exportProgress() {
+            const exportData = {
+                timestamp: new Date().toISOString(),
+                gameState: gameState,
+                version: '1.0'
+            };
+            const dataStr = JSON.stringify(exportData, null, 2);
+            const blob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `vpn-game-progress-${new Date().getTime()}.json`;
+            link.click();
+            URL.revokeObjectURL(url);
+            console.log('遊戲進度已匯出');
+        }
+        
+        // === 進度匯入 ===
+        function importProgress(file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const importedData = JSON.parse(e.target.result);
+                    if (importedData.gameState && importedData.version === '1.0') {
+                        Object.assign(gameState, importedData.gameState);
+                        saveGameState();
+                        alert('遊戲進度已成功匯入！頁面將重新加載。');
+                        location.reload();
+                    } else {
+                        alert('匯入檔案格式不正確或版本不符');
+                    }
+                } catch (err) {
+                    alert('匯入失敗：' + err.message);
+                }
+            };
+            reader.readAsText(file);
+        }
+        
+        // === 筆記功能 ===
+        function addNote(content, stage) {
+            const note = {
+                id: Date.now(),
+                content: content,
+                stage: stage || gameState.currentPage,
+                timestamp: new Date().toISOString()
+            };
+            gameState.notes.push(note);
+            saveGameState();
+            return note;
+        }
+        
+        function deleteNote(noteId) {
+            gameState.notes = gameState.notes.filter(n => n.id !== noteId);
+            saveGameState();
+        }
+        
+        function getNotesByStage(stage) {
+            return gameState.notes.filter(n => n.stage === stage);
+        }
+        
+        // === 成就面板顯示 ===
+        function showAchievementsPanel() {
+            const unlockedCount = Object.values(gameState.achievements).filter(a => a.unlocked).length;
+            const totalCount = Object.keys(gameState.achievements).length;
+            
+            let panelHTML = `
+                <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--panel-bg); padding: 30px; border-radius: 12px; z-index: 9999; max-width: 500px; max-height: 600px; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.5); border: 1px solid var(--border-color);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h2 style="color: var(--primary-light); margin: 0;">🏆 成就系統</h2>
+                    <button onclick="this.closest('[style*=fixed]').remove()" style="background: transparent; border: none; color: var(--text-secondary); font-size: 1.5rem; cursor: pointer;">✕</button>
+                </div>
+                <div style="margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid var(--border-color);">
+                    <div style="color: var(--text-secondary); font-size: 0.9rem;">進度: ${unlockedCount}/${totalCount}</div>
+                    <div style="background: #334155; height: 8px; border-radius: 4px; margin-top: 8px; overflow: hidden;">
+                        <div style="background: linear-gradient(to right, var(--success), var(--primary)); height: 100%; width: ${(unlockedCount/totalCount)*100}%;"></div>
+                    </div>
+                </div>
+            `;
+            
+            for (const [id, achievement] of Object.entries(gameState.achievements)) {
+                panelHTML += `
+                    <div style="padding: 12px; margin-bottom: 10px; background: ${achievement.unlocked ? 'rgba(16, 185, 129, 0.1)' : 'rgba(51, 65, 85, 0.3)'}; border-radius: 8px; border-left: 3px solid ${achievement.unlocked ? 'var(--success)' : 'var(--border-color)'};">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="font-size: 1.3rem;">${achievement.unlocked ? '✓' : '🔒'}</span>
+                            <div>
+                                <div style="font-weight: bold; color: ${achievement.unlocked ? 'var(--text-primary)' : 'var(--text-secondary)'};">${achievement.name}</div>
+                                <div style="font-size: 0.85rem; color: var(--text-secondary);">${achievement.description}</div>
+                                ${achievement.unlockedAt ? `<div style="font-size: 0.75rem; color: #94a3b8; margin-top: 4px;">${new Date(achievement.unlockedAt).toLocaleDateString()}</div>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            panelHTML += '</div>';
+            const panel = document.createElement('div');
+            panel.innerHTML = panelHTML;
+            document.body.appendChild(panel.firstElementChild);
+        }
+        
+        // === 性能比較數據 ===
+        const performanceData = {
+            'aes-256': { speed: 85, security: 100, stability: 95, name: 'AES-256' },
+            'aes-128': { speed: 95, security: 90, stability: 93, name: 'AES-128' },
+            'chacha20': { speed: 98, security: 95, stability: 92, name: 'ChaCha20' },
+            'openvpn': { speed: 75, security: 95, stability: 90, name: 'OpenVPN' },
+            'wireguard': { speed: 98, security: 98, stability: 96, name: 'WireGuard' },
+            'ikev2': { speed: 88, security: 93, stability: 94, name: 'IKEv2' }
+        };
+        
+        // === 攻擊模擬腳本 ===
+        const attackScripts = {
+            mitm: {
+                name: '中間人攻擊模擬',
+                description: '模擬攻擊者在通信路徑中截取數據的攻擊',
+                steps: ['尋找目標連接', '截取數據包', '分析流量', '修改數據', '重新轉發'],
+                defense: '使用TLS/SSL加密和證書認證'
+            },
+            ddos: {
+                name: 'DDoS攻擊模擬',
+                description: '模擬多源分散式拒絕服務攻擊',
+                steps: ['收集僵屍網絡', '發送大量請求', '耗盡目標資源', '導致服務癱瘓'],
+                defense: '部署DDoS防護、速率限制、CDN加速'
+            },
+            portscan: {
+                name: '端口掃描模擬',
+                description: '模擬掃描目標主機開放的網路端口',
+                steps: ['發送探測包', '分析回應', '識別服務', '尋找漏洞'],
+                defense: '防火牆規則、端口隱藏、異常檢測'
+            }
+        };
+        
         function initEventListeners() {
             // 導航按鈕
             backBtn.addEventListener('click', goBack);
@@ -4997,6 +5327,39 @@ verb 3
             document.getElementById('tutorialMode').addEventListener('click', () => showPage('tutorialPage'));
             document.getElementById('challengeMode').addEventListener('click', () => showPage('challengePage'));
             document.getElementById('freeMode').addEventListener('click', () => showPage('freeModePage'));
+            
+            // 成就面板
+            document.getElementById('achievementBtn').addEventListener('click', showAchievementsPanel);
+            
+            // 匯出/匯入
+            document.getElementById('exportBtn').addEventListener('click', exportProgress);
+            document.getElementById('importBtn').addEventListener('click', () => {
+                document.getElementById('importFile').click();
+            });
+            document.getElementById('importFile').addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    importProgress(e.target.files[0]);
+                    e.target.value = ''; // 清除選擇
+                }
+            });
+            
+            // 全域鍵盤快速鍵
+            document.addEventListener('keydown', function(e) {
+                // Esc 返回首頁
+                if (e.key === 'Escape' && gameState.currentPage !== 'homePage') {
+                    showPage('homePage');
+                }
+                // Alt+B 返回上一頁
+                if (e.altKey && e.key === 'b') {
+                    e.preventDefault();
+                    goBack();
+                }
+                // Alt+H 返回首頁
+                if (e.altKey && e.key === 'h') {
+                    e.preventDefault();
+                    showPage('homePage');
+                }
+            });
             
             // 窗口大小變化時重新計算位置
             window.addEventListener('resize', function() {
